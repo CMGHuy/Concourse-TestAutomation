@@ -1,0 +1,79 @@
+groups:
+  - name: Run_Test_Cases
+    jobs:
+      - run-test-cases
+
+  - name: Destroy_Test_Machines
+    jobs:
+      - destroy-test-machines
+
+  # This docker image is provided by the company.
+  # The value of the used variables are stored inside the K8S secret object
+  # Since the K8S secret file is confidential data, it is not uploaded in the personal repository
+  # In order to use this code, the user must use another docker image.
+  # A basic Linux docker image is sufficient to run task
+resources:
+  - name: infra-tools
+    type: docker-image
+    source:
+      repository: fra.ocir.io/red4dlh/tools/infra-tools
+      tag: "latest"
+      username: ((red4dlh-registry-auth.username))
+      password: ((red4dlh-registry-auth.password))
+
+jobs:
+  # Run Tests
+  # The main implementation of this job is executing an ssh command inside the container
+  # to connect to the master machine. When it is connected, the AutomationTesting.sh is executed,
+  # which triggers the test execution.
+  - name: run-test-cases
+    serial: true
+    plan:
+      - get: infra-tools
+      - task: run-test
+        privileged: true
+        image: infra-tools
+        config:
+          platform: linux
+          inputs:
+            - name: infra-tools
+          run:
+            path: sh
+            args:
+              - -c
+              - |
+                mkdir .ssh || true
+                echo '((ssh-testing-machine.test_ssh))' > .ssh/id_rsa
+                echo '((ssh-testing-machine.ssh_config))' > .ssh/config
+                cp -r .ssh /root/.ssh
+                chmod 600 /root/.ssh/id_rsa
+                chmod 644 /root/.ssh/config
+                ssh testing "chmod a+x /home/ubuntu/mnt/executable/AutomationTesting.sh;bash -c /home/ubuntu/mnt/executable/AutomationTesting.sh"
+
+  # Destroy Windows test machines
+  # The main implementation of this job is executing an ssh command inside the container
+  # to connect to the master machine. When it is connected, the Terraform command to destroy
+  # worker instances is executed.
+  - name: destroy-test-machines
+    serial: true
+    plan:
+      - get: infra-tools
+      - task: destroy-machines
+        privileged: true
+        image: infra-tools
+        config:
+          platform: linux
+          run:
+            path: sh
+            args:
+              - -c
+              - |
+                mkdir .ssh || true
+                echo '((ssh-testing-machine.test_ssh))' > .ssh/id_rsa
+                echo '((ssh-testing-machine.ssh_config))' > .ssh/config
+                cp -r .ssh /root/.ssh
+                chmod 600 /root/.ssh/id_rsa
+                chmod 644 /root/.ssh/config
+                ssh testing "source /home/ubuntu/mnt/terraform/set-env-dev.sh;cd /home/ubuntu/mnt/terraform/nativ;terraform destroy -auto-approve;sh /home/ubuntu/mnt/executable/removeOldFile.sh"
+
+          
